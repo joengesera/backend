@@ -1,0 +1,10 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const SyncController_1 = require("../controllers/SyncController");
+const auth_middleware_1 = require("../middlewares/auth.middleware");
+const router = (0, express_1.Router)();
+router.use(auth_middleware_1.authenticateToken);
+router.post('/push', SyncController_1.handleSyncPush);
+router.get('/pull', SyncController_1.handleSyncPull);
+exports.default = router;

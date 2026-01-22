@@ -1,0 +1,193 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                     String         @id @default(uuid())
+  email                  String         @unique
+  name                   String
+  passwordHash           String
+  avatarUrl              String?
+  language               String         @default("fr")
+  timezone               String         @default("Europe/Paris")
+  updatedAt              DateTime       @updatedAt
+  lastSyncedAt           DateTime?
+  createdAt              DateTime       @default(now())
+  resetPasswordExpiresAt DateTime?
+  resetPasswordToken     String?
+  courses                Course[]
+  events                 Event[]
+  grades                 Grade[]
+  refreshTokens          RefreshToken[]
+  syncHistories          SyncHistory[]
+  tasks                  Task[]
+
+  @@index([email])
+  @@map("users")
+}
+
+model RefreshToken {
+  id        String    @id @default(uuid())
+  token     String    @unique
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime  @default(now())
+  revokedAt DateTime?
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([token])
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+model Course {
+  id          String    @id @default(uuid())
+  code        String
+  name        String
+  description String?
+  color       String    @default("#3B82F6")
+  credits     Int?      @default(3)
+  userId      String
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  isDeleted   Boolean   @default(false)
+  deletedAt   DateTime?
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  events      Event[]
+  grades      Grade[]
+  tasks       Task[]
+
+  @@unique([userId, code])
+  @@index([userId])
+  @@map("courses")
+}
+
+model Task {
+  id             String       @id @default(uuid())
+  localId        String?      @unique
+  title          String
+  description    String?
+  status         TaskStatus   @default(PENDING)
+  priority       TaskPriority @default(MEDIUM)
+  dueDate        DateTime?
+  completedAt    DateTime?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  userId         String
+  courseId       String?
+  syncStatus     SyncStatus   @default(SYNCED)
+  lastModifiedAt DateTime     @default(now())
+  version        Int          @default(1)
+  deletedAt      DateTime?
+  isDeleted      Boolean      @default(false)
+  course         Course?      @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status])
+  @@index([userId, dueDate])
+  @@index([userId, syncStatus])
+  @@index([userId, courseId])
+  @@map("tasks")
+}
+
+model Event {
+  id             String     @id @default(uuid())
+  localId        String?    @unique
+  title          String
+  description    String?
+  type           EventType  @default(CLASS)
+  startDate      DateTime
+  endDate        DateTime
+  isAllDay       Boolean    @default(false)
+  location       String?
+  recurrence     String?
+  userId         String
+  courseId       String?
+  syncStatus     SyncStatus @default(SYNCED)
+  lastModifiedAt DateTime   @default(now())
+  version        Int        @default(1)
+  course         Course?    @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  user           User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, startDate])
+  @@index([userId, type])
+  @@index([userId, syncStatus])
+  @@map("events")
+}
+
+model Grade {
+  id             String     @id @default(uuid())
+  localId        String?    @unique
+  name           String
+  score          Float
+  maxScore       Float      @default(20.0)
+  weight         Float?     @default(1.0)
+  date           DateTime?
+  comment        String?
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+  userId         String
+  courseId       String
+  syncStatus     SyncStatus @default(SYNCED)
+  lastModifiedAt DateTime   @default(now())
+  version        Int        @default(1)
+  course         Course     @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  user           User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, courseId])
+  @@index([userId, date])
+  @@map("grades")
+}
+
+model SyncHistory {
+  id          String    @id @default(uuid())
+  userId      String
+  deviceId    String
+  syncType    String
+  itemsPushed Int       @default(0)
+  itemsPulled Int       @default(0)
+  conflicts   Int       @default(0)
+  status      String
+  error       String?
+  startedAt   DateTime  @default(now())
+  completedAt DateTime?
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, startedAt])
+  @@map("sync_histories")
+}
+
+enum TaskStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  CANCELED
+}
+
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum EventType {
+  CLASS
+  EXAM
+  QUIZ
+  ASSIGNMENT
+  STUDY
+  PERSONAL
+  MEETING
+}
+
+enum SyncStatus {
+  PENDING
+  SYNCED
+  CONFLICT
+}
