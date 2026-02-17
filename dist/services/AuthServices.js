@@ -10,60 +10,71 @@ const db_1 = require("../lib/db");
 const crypto_1 = __importDefault(require("crypto"));
 const emailService_1 = require("./emailService");
 const SALT_ROUNDS = 10;
-const JWT_SECRET = String(process.env.JWT_SECRET);
-const JWT_REFRESH_SECRET = String(process.env.JWT_REFRESH_SECRET);
-if (!JWT_SECRET || !JWT_REFRESH_SECRET) {
-    throw new Error("JWT_SECRET or JWT_REFRESH_SECRET must be defined");
+function getJwtSecret() {
+    const secret = process.env.JWT_SECRET;
+    if (!secret) {
+        throw new Error('JWT_SECRET must be defined');
+    }
+    return secret;
+}
+function getRefreshJwtSecret() {
+    const secret = process.env.JWT_REFRESH_SECRET;
+    if (!secret) {
+        throw new Error('JWT_REFRESH_SECRET must be defined');
+    }
+    return secret;
+}
+function hashResetToken(token) {
+    return crypto_1.default.createHash('sha256').update(token).digest('hex');
 }
 class AuthService {
-    // Génération des tokens
     static async generateTokens(userId) {
-        const accessToken = jsonwebtoken_1.default.sign({ userId }, JWT_SECRET, { expiresIn: '15m' });
-        const refreshToken = jsonwebtoken_1.default.sign({ userId }, JWT_REFRESH_SECRET, { expiresIn: '10d' });
+        const accessToken = jsonwebtoken_1.default.sign({ userId }, getJwtSecret(), { expiresIn: '15m' });
+        const refreshToken = jsonwebtoken_1.default.sign({ userId }, getRefreshJwtSecret(), { expiresIn: '10d' });
         await db_1.db.refreshToken.create({
             data: {
                 token: refreshToken,
-                userId: userId,
+                userId,
                 expiresAt: new Date(Date.now() + 10 * 24 * 60 * 60 * 1000)
             }
         });
         return { accessToken, refreshToken };
     }
-    // Logique de refresh
     static async refreshToken(refreshToken) {
-        const payload = jsonwebtoken_1.default.verify(refreshToken, JWT_REFRESH_SECRET);
-        const dbToken = await db_1.db.refreshToken.findUnique({ where: { token: refreshToken } });
-        if (!dbToken || dbToken.expiresAt < new Date(Date.now())) {
-            throw new Error("Token invalide");
+        const payload = jsonwebtoken_1.default.verify(refreshToken, getRefreshJwtSecret());
+        if (!payload.userId || typeof payload.userId !== 'string') {
+            throw new Error('Token invalide');
         }
-        // On genere un nouvel access token et un nouveau refresh token
+        const dbToken = await db_1.db.refreshToken.findUnique({
+            where: { token: refreshToken }
+        });
+        if (!dbToken || dbToken.expiresAt < new Date()) {
+            throw new Error('Token invalide');
+        }
         const tokens = await this.generateTokens(payload.userId);
-        // On supprime le token refresh
         await db_1.db.refreshToken.delete({ where: { token: refreshToken } });
         return tokens;
     }
-    // Logique de logout
     static async logout(refreshToken) {
         await db_1.db.refreshToken.delete({ where: { token: refreshToken } });
     }
-    // Mot de passe oublie
     static async forgotPassword(email) {
         const user = await db_1.db.user.findUnique({ where: { email } });
-        if (!user)
-            throw new Error("Utilisateur non trouvé");
+        if (!user) {
+            throw new Error('Utilisateur non trouv�');
+        }
         const resetToken = crypto_1.default.randomBytes(32).toString('hex');
-        const expiresAt = new Date(Date.now() + 600 * 1000); // 1 heure
+        const hashedResetToken = hashResetToken(resetToken);
+        const expiresAt = new Date(Date.now() + 60 * 60 * 1000);
         await db_1.db.user.update({
             where: { id: user.id },
             data: {
-                resetPasswordToken: resetToken,
+                resetPasswordToken: hashedResetToken,
                 resetPasswordExpiresAt: expiresAt
             }
         });
         await emailService_1.EmailService.sendResetPasswordEmail(email, resetToken);
-        return { message: "Email de réinitialisation envoyé" };
     }
-    // Inscription 
     static async register(email, name, password) {
         const hashedPassword = await bcrypt_1.default.hash(password, SALT_ROUNDS);
         const user = await db_1.db.user.create({
@@ -71,35 +82,51 @@ class AuthService {
                 email,
                 name,
                 passwordHash: hashedPassword
+            },
+            select: {
+                id: true,
+                email: true,
+                name: true,
+                createdAt: true,
+                updatedAt: true
             }
         });
         return user;
     }
-    // Connexion
     static async login(email, password) {
         const user = await db_1.db.user.findUnique({ where: { email } });
-        if (!user)
-            throw new Error("Utilisateur non trouvé");
+        if (!user) {
+            throw new Error('Utilisateur non trouv�');
+        }
         const isPasswordValid = await bcrypt_1.default.compare(password, user.passwordHash);
-        if (!isPasswordValid)
-            throw new Error("Mot de passe incorrect");
-        // Génération du token
+        if (!isPasswordValid) {
+            throw new Error('Mot de passe incorrect');
+        }
         const tokens = await this.generateTokens(user.id);
-        return { user, tokens };
+        return {
+            user: {
+                id: user.id,
+                email: user.email,
+                name: user.name,
+                createdAt: user.createdAt,
+                updatedAt: user.updatedAt
+            },
+            tokens
+        };
     }
-    // 
-    // Reset password 
     static async resetPassword(token, newPassword) {
+        const hashedToken = hashResetToken(token);
         const user = await db_1.db.user.findFirst({
             where: {
-                resetPasswordToken: token,
+                resetPasswordToken: hashedToken,
                 resetPasswordExpiresAt: {
-                    gte: new Date(Date.now())
+                    gte: new Date()
                 }
             }
         });
-        if (!user)
-            throw new Error("Token invalide");
+        if (!user) {
+            throw new Error('Token invalide');
+        }
         const hashedPassword = await bcrypt_1.default.hash(newPassword, SALT_ROUNDS);
         await db_1.db.user.update({
             where: { id: user.id },
@@ -109,7 +136,6 @@ class AuthService {
                 resetPasswordExpiresAt: null
             }
         });
-        return user;
     }
 }
 exports.AuthService = AuthService;

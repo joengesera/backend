@@ -1,57 +1,45 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-// src/routes/auth.routes.ts
 const express_1 = require("express");
 const AuthController_1 = require("../controllers/AuthController");
+const auth_validators_1 = require("../validators/auth.validators");
 const router = (0, express_1.Router)();
-// Inscription : POST /api/auth/register
 router.post('/register', async (req, res) => {
-    try {
-        await (0, AuthController_1.register)(req, res);
+    const parsed = auth_validators_1.registerSchema.safeParse(req.body);
+    if (!parsed.success) {
+        return res.status(400).json({ error: parsed.error.flatten() });
     }
-    catch (error) {
-        res.status(400).json({ error: error.message });
-        console.log(error);
-    }
+    await (0, AuthController_1.register)(req, res);
 });
-// Connexion : POST /api/auth/login
 router.post('/login', async (req, res) => {
-    try {
-        await (0, AuthController_1.login)(req, res);
+    const parsed = auth_validators_1.loginSchema.safeParse(req.body);
+    if (!parsed.success) {
+        return res.status(400).json({ error: parsed.error.flatten() });
     }
-    catch (error) {
-        res.status(400).json({ error: error.message });
-    }
+    await (0, AuthController_1.login)(req, res);
 });
-// Refresh Token: POST /api/auth/refresh-token
 router.post('/refresh-token', async (req, res) => {
+    const parsed = auth_validators_1.refreshTokenSchema.safeParse(req.body);
+    if (!parsed.success) {
+        return res.status(400).json({ error: parsed.error.flatten() });
+    }
     await (0, AuthController_1.RefreshToken)(req, res);
 });
-// Logout: POST /api/auth/logout
 router.post('/logout', async (req, res) => {
-    try {
-        (0, AuthController_1.logout)(req, res);
-    }
-    catch (error) {
-        res.status(400).json({ error: error.message });
-    }
+    await (0, AuthController_1.logout)(req, res);
 });
-// Demande de reinitialisation
 router.post('/forgot-password', async (req, res) => {
-    try {
-        (0, AuthController_1.forgotPassword)(req, res);
+    const parsed = auth_validators_1.forgotPasswordSchema.safeParse(req.body);
+    if (!parsed.success) {
+        return res.status(400).json({ error: parsed.error.flatten() });
     }
-    catch (error) {
-        res.status(400).json({ error: error.message });
-    }
+    await (0, AuthController_1.forgotPassword)(req, res);
 });
-// Reset Password: POST /api/auth/reset-password
 router.post('/reset-password', async (req, res) => {
-    try {
-        (0, AuthController_1.ResetPassword)(req, res);
+    const parsed = auth_validators_1.resetPasswordSchema.safeParse(req.body);
+    if (!parsed.success) {
+        return res.status(400).json({ error: parsed.error.flatten() });
     }
-    catch (error) {
-        res.status(400).json({ error: error.message });
-    }
+    await (0, AuthController_1.ResetPassword)(req, res);
 });
 exports.default = router;

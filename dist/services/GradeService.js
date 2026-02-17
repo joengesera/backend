@@ -3,26 +3,54 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.GradeService = void 0;
 const db_1 = require("../lib/db");
 class GradeService {
+    static normalizeToTwenty(score, maxScore) {
+        if (!maxScore)
+            return 0;
+        return (score / maxScore) * 20;
+    }
+    static calculatePercentageBasedAverage(grades, workTypes) {
+        if (grades.length === 0)
+            return 0;
+        if (workTypes.length === 0) {
+            const sum = grades.reduce((acc, grade) => acc + this.normalizeToTwenty(grade.score, grade.maxScore), 0);
+            return sum / grades.length;
+        }
+        const gradesByType = new Map();
+        grades.forEach((grade) => {
+            const type = grade.workType?.type || 'EXAMEN';
+            if (!gradesByType.has(type))
+                gradesByType.set(type, []);
+            gradesByType.get(type).push(grade);
+        });
+        let totalWeightedScore = 0;
+        let totalWeight = 0;
+        workTypes.forEach((typeConfig) => {
+            const typeGrades = gradesByType.get(typeConfig.type) || [];
+            if (typeGrades.length === 0)
+                return;
+            const sum = typeGrades.reduce((acc, g) => acc + this.normalizeToTwenty(g.score, g.maxScore), 0);
+            const average = sum / typeGrades.length;
+            totalWeightedScore += average * typeConfig.weightPercent;
+            totalWeight += typeConfig.weightPercent;
+        });
+        if (totalWeight > 0)
+            return totalWeightedScore / totalWeight;
+        const fallbackSum = grades.reduce((acc, grade) => acc + this.normalizeToTwenty(grade.score, grade.maxScore), 0);
+        return fallbackSum / grades.length;
+    }
     /**
      * Calculate weighted average for a specific course
      */
     static async getCourseAverage(userId, courseId) {
         const grades = await db_1.db.grade.findMany({
             where: { userId, courseId },
-            include: { course: true }
+            include: { course: true, workType: true }
         });
         if (grades.length === 0) {
             return null;
         }
-        let totalWeightedScore = 0;
-        let totalWeight = 0;
-        grades.forEach(grade => {
-            const percentage = (grade.score / grade.maxScore) * 20;
-            const weight = grade.weight || 1.0;
-            totalWeightedScore += percentage * weight;
-            totalWeight += weight;
-        });
-        const average = totalWeight > 0 ? totalWeightedScore / totalWeight : 0;
+        const workTypes = await db_1.db.courseWorkType.findMany({ where: { courseId } });
+        const average = this.calculatePercentageBasedAverage(grades, workTypes);
         return {
             courseId,
             courseName: grades[0].course?.name || 'Unknown',
@@ -33,8 +61,9 @@ class GradeService {
                 name: g.name,
                 score: g.score,
                 maxScore: g.maxScore,
-                weight: g.weight,
-                normalized: Math.round((g.score / g.maxScore) * 20 * 100) / 100
+                workType: g.workType?.type || null,
+                workTypePercent: g.workType?.weightPercent ?? null,
+                normalized: Math.round(this.normalizeToTwenty(g.score, g.maxScore) * 100) / 100
             }))
         };
     }
@@ -44,7 +73,7 @@ class GradeService {
     static async getGeneralAverage(userId) {
         const grades = await db_1.db.grade.findMany({
             where: { userId },
-            include: { course: true }
+            include: { course: true, workType: true }
         });
         if (grades.length === 0) {
             return {
@@ -64,17 +93,19 @@ class GradeService {
             acc[courseId].push(grade);
             return acc;
         }, {});
+        const courseIds = Object.keys(gradesByCourse);
+        const workTypes = await db_1.db.courseWorkType.findMany({
+            where: { courseId: { in: courseIds } }
+        });
+        const workTypesByCourse = workTypes.reduce((acc, wt) => {
+            if (!acc[wt.courseId])
+                acc[wt.courseId] = [];
+            acc[wt.courseId].push(wt);
+            return acc;
+        }, {});
         // Calculate average for each course
         const courseAverages = Object.entries(gradesByCourse).map(([courseId, courseGrades]) => {
-            let totalWeightedScore = 0;
-            let totalWeight = 0;
-            courseGrades.forEach(grade => {
-                const percentage = (grade.score / grade.maxScore) * 20;
-                const weight = grade.weight || 1.0;
-                totalWeightedScore += percentage * weight;
-                totalWeight += weight;
-            });
-            const average = totalWeight > 0 ? totalWeightedScore / totalWeight : 0;
+            const average = this.calculatePercentageBasedAverage(courseGrades, workTypesByCourse[courseId] || []);
             return {
                 courseId,
                 courseName: courseGrades[0].course?.name || 'Unknown',

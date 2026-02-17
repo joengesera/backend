@@ -39,7 +39,10 @@ const auth_middleware_1 = require("../middlewares/auth.middleware");
 const router = (0, express_1.Router)();
 router.use(auth_middleware_1.authenticateToken); // Protect all course routes
 router.get('/', CourseController.getCourses);
+router.post('/work-types/init', CourseController.initCourseWorkTypes);
+router.get('/:id/work-types', CourseController.getCourseWorkTypes);
 router.post('/', CourseController.createCourse);
+router.put('/:id/work-types', CourseController.updateCourseWorkTypes);
 router.patch('/:id', CourseController.updateCourse);
 router.delete('/:id', CourseController.deleteCourse);
 exports.default = router;

@@ -10,7 +10,8 @@ class RiskService {
         const course = await db_1.db.course.findUnique({
             where: { id: courseId },
             include: {
-                grades: true,
+                grades: { include: { workType: true } },
+                workTypes: true,
                 tasks: { where: { userId: userId } }, // Retrait temporaire du filtre isDeleted
                 events: {
                     where: { type: 'EXAM' },
@@ -25,9 +26,10 @@ class RiskService {
         // 2. CALCUL DES INDICATEURS
         // On vérifie que les tableaux existent pour éviter les crashs
         const grades = course.grades || [];
+        const workTypes = course.workTypes || [];
         const tasks = course.tasks || [];
         const nextExam = (course.events && course.events.length > 0) ? course.events[0] : null;
-        const gradeFactor = this.calculateGradeScore(grades);
+        const gradeFactor = this.calculateGradeScore(grades, workTypes);
         const workloadFactor = this.calculateWorkloadScore(tasks);
         const urgencyFactor = this.calculateUrgencyScore(nextExam);
         const finalScore = (gradeFactor * 0.4) + (workloadFactor * 0.3) + (urgencyFactor * 0.3);
@@ -43,10 +45,33 @@ class RiskService {
             }
         };
     }
-    static calculateGradeScore(grades) {
+    static calculateGradeScore(grades, workTypes) {
         if (grades.length === 0)
             return 40;
-        const average = grades.reduce((acc, g) => acc + (g.score / g.maxScore), 0) / grades.length;
+        if (workTypes.length === 0) {
+            const average = grades.reduce((acc, g) => acc + (g.score / g.maxScore), 0) / grades.length;
+            return Math.max(0, (1 - average) * 100);
+        }
+        const gradesByType = new Map();
+        grades.forEach((grade) => {
+            const type = grade.workType?.type;
+            if (!type)
+                return;
+            if (!gradesByType.has(type))
+                gradesByType.set(type, []);
+            gradesByType.get(type).push(grade);
+        });
+        let totalWeighted = 0;
+        let totalWeight = 0;
+        workTypes.forEach((typeConfig) => {
+            const typeGrades = gradesByType.get(typeConfig.type) || [];
+            if (typeGrades.length === 0)
+                return;
+            const avg = typeGrades.reduce((acc, g) => acc + (g.score / g.maxScore), 0) / typeGrades.length;
+            totalWeighted += avg * typeConfig.weightPercent;
+            totalWeight += typeConfig.weightPercent;
+        });
+        const average = totalWeight > 0 ? totalWeighted / totalWeight : 0;
         return Math.max(0, (1 - average) * 100);
     }
     static calculateWorkloadScore(tasks) {

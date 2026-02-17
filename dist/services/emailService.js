@@ -33,6 +33,7 @@ exports.EmailService = EmailService;
 EmailService.transporter = nodemailer_1.default.createTransport({
     host: process.env.MAILTRAP_HOST,
     port: 2525,
+    secure: false,
     auth: {
         user: process.env.MAILTRAP_USER,
         pass: process.env.MAILTRAP_PASS

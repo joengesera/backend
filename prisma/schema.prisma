@@ -61,6 +61,8 @@ model Course {
   events      Event[]
   grades      Grade[]
   tasks       Task[]
+  workTypes   CourseWorkType[]
+  syncStatus  SyncStatus @default(SYNCED)
 
   @@unique([userId, code])
   @@index([userId])
@@ -133,15 +135,33 @@ model Grade {
   updatedAt      DateTime   @updatedAt
   userId         String
   courseId       String
+  workTypeId     String?
   syncStatus     SyncStatus @default(SYNCED)
   lastModifiedAt DateTime   @default(now())
   version        Int        @default(1)
   course         Course     @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  workType       CourseWorkType? @relation(fields: [workTypeId], references: [id], onDelete: SetNull)
   user           User       @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, courseId])
   @@index([userId, date])
+  @@index([courseId, workTypeId])
   @@map("grades")
+}
+
+model CourseWorkType {
+  id            String   @id @default(uuid())
+  courseId      String
+  type          WorkType
+  weightPercent Float
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  course        Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  grades        Grade[]
+
+  @@unique([courseId, type])
+  @@index([courseId])
+  @@map("course_work_types")
 }
 
 model SyncHistory {
@@ -190,4 +210,13 @@ enum SyncStatus {
   PENDING
   SYNCED
   CONFLICT
+}
+
+enum WorkType {
+  EXAMEN
+  INTERRO
+  PROJET
+  TD
+  TP
+  EXERCICES
 }

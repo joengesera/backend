@@ -1,60 +1,57 @@
-// src/routes/auth.routes.ts
-import { Router } from 'express';
-import { Request, Response } from 'express';
+import { Router, Request, Response } from 'express';
 import { register, login, ResetPassword, forgotPassword, logout, RefreshToken } from '../controllers/AuthController';
-
+import {
+  registerSchema,
+  loginSchema,
+  refreshTokenSchema,
+  forgotPasswordSchema,
+  resetPasswordSchema
+} from '../validators/auth.validators';
 
 const router = Router();
 
-// Inscription : POST /api/auth/register
 router.post('/register', async (req: Request, res: Response) => {
-  try {
-    await register(req, res);
-  } catch (error: any) {
-    res.status(400).json({ error: error.message });
-    console.log(error);
+  const parsed = registerSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error.flatten() });
   }
+  await register(req, res);
 });
 
-// Connexion : POST /api/auth/login
 router.post('/login', async (req: Request, res: Response) => {
-  try {
-    await login(req, res);
-  } catch (error: any) {
-    res.status(400).json({ error: error.message });
+  const parsed = loginSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error.flatten() });
   }
+  await login(req, res);
 });
 
-// Refresh Token: POST /api/auth/refresh-token
 router.post('/refresh-token', async (req: Request, res: Response) => {
+  const parsed = refreshTokenSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error.flatten() });
+  }
   await RefreshToken(req, res);
 });
 
-// Logout: POST /api/auth/logout
 router.post('/logout', async (req: Request, res: Response) => {
-  try {
-    logout(req, res);
-  } catch (error: any) {
-    res.status(400).json({ error: error.message });
-  }
+  await logout(req, res);
 });
 
-// Demande de reinitialisation
 router.post('/forgot-password', async (req: Request, res: Response) => {
-  try {
-    forgotPassword(req, res);
-  } catch (error: any) {
-    res.status(400).json({ error: error.message });
+  const parsed = forgotPasswordSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error.flatten() });
   }
+  await forgotPassword(req, res);
 });
 
-// Reset Password: POST /api/auth/reset-password
 router.post('/reset-password', async (req: Request, res: Response) => {
-  try {
-    ResetPassword(req, res);
-  } catch (error: any) {
-    res.status(400).json({ error: error.message });
+  const parsed = resetPasswordSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error.flatten() });
   }
+  await ResetPassword(req, res);
 });
 
 export default router;

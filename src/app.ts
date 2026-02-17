@@ -1,4 +1,4 @@
-import "dotenv/config"; // Must be first
+import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import helmet from "helmet";
@@ -10,48 +10,62 @@ import taskRoutes from "./routes/task.routes";
 import eventRoutes from "./routes/event.routes";
 import gradeRoutes from "./routes/grade.routes";
 import testRoutes from "./routes/test.routes";
+import profileRoutes from "./routes/profile.routes";
 import { globalErrorHandler } from "./middlewares/error.middleware";
 import rateLimit from "express-rate-limit";
 
-
 const app = express();
-export const globabalLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 100, // limit each IP to 100 requests per windowMs
-    standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
-    legacyHeaders: false, // Disable the `X-RateLimit-*` headers
-    message: 'Trop de requêtes provenant de cette IP, veuillez réessayer plus tard.'
-})
+
+const allowedOrigins = (process.env.CORS_ORIGINS || "")
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+
+export const globalLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 100,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: 'Trop de requ�tes provenant de cette IP, veuillez r�essayer plus tard.'
+});
 
 export const authLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 5, // limit each IP to 5 requests per windowMs
-    standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
-    legacyHeaders: false, // Disable the `X-RateLimit-*` headers
-    skipSuccessfulRequests: true, // Only count failed requests toward the rate limit
-    message: 'Trop de tentatives de connexion provenant de cette IP, veuillez réessayer plus tard.'
-})
+    windowMs: 15 * 60 * 1000,
+    max: 5000,
+    standardHeaders: true,
+    legacyHeaders: false,
+    skipSuccessfulRequests: true,
+    message: 'Trop de tentatives de connexion provenant de cette IP, veuillez r�essayer plus tard.'
+});
 
-app.use(globabalLimiter);
+app.use(globalLimiter);
 app.use(cors({
-    credentials: true
+    credentials: true,
+
 }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(helmet());
 
-app.get("/", (req, res) => {
-    res.send("Hello i've finished my app! yeah!");
+app.get("/", (_req, res) => {
+    res.send("Backend running");
 });
-
-app.use('/api/risk', globabalLimiter, riskRoutes);
-app.use('/api/sync', globabalLimiter, syncRoutes);
+// Routes
+app.get("/api/health", globalLimiter, (_req, res) => {
+    res.json({ status: 'ok' });
+});
+app.use('/api/sync', globalLimiter, syncRoutes);
 app.use('/api/auth', authLimiter, authRoutes);
-app.use('/api/courses', globabalLimiter, courseRoutes);
-app.use('/api/tasks', globabalLimiter, taskRoutes);
-app.use('/api/events', globabalLimiter, eventRoutes);
-app.use('/api/grades', globabalLimiter, gradeRoutes);
-app.use('/api/test', testRoutes);
+app.use('/api/courses', globalLimiter, courseRoutes);
+app.use('/api/tasks', globalLimiter, taskRoutes);
+app.use('/api/events', globalLimiter, eventRoutes);
+app.use('/api/grades', globalLimiter, gradeRoutes);
+app.use("/api/risk", globalLimiter, riskRoutes);
+app.use("/api", globalLimiter, profileRoutes);
+
+if (process.env.NODE_ENV !== 'production') {
+    app.use('/api/test', testRoutes);
+}
 
 app.use(globalErrorHandler);
 

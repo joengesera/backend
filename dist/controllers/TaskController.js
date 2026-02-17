@@ -8,10 +8,19 @@ const getTasks = async (req, res) => {
         const { courseId } = req.query;
         if (!userId)
             return res.status(401).json({ error: "Unauthorized" });
-        const where = { userId, isDeleted: false };
+        const where = { userId, isDeleted: false, };
         if (courseId)
             where.courseId = String(courseId);
-        const tasks = await db_1.db.task.findMany({ where });
+        const tasks = await db_1.db.task.findMany({
+            where: {
+                userId: userId,
+                isDeleted: false,
+                ...courseId && { courseId: String(courseId) }
+            },
+            orderBy: {
+                dueDate: 'asc'
+            }
+        });
         res.json(tasks);
     }
     catch (error) {
