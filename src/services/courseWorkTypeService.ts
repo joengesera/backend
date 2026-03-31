@@ -1,28 +1,22 @@
-import { WorkType } from '@prisma/client';
-
-type WorkTypeInput = {
-    type: WorkType;
-    weightPercent?: number;
-};
-
-export const ALL_WORK_TYPES: WorkType[] = [
-    WorkType.EXAMEN,
-    WorkType.INTERRO,
-    WorkType.PROJET,
-    WorkType.TD,
-    WorkType.TP,
-    WorkType.EXERCICES
+export const ALL_WORK_TYPES: any[] = [
+    'EXAMEN',
+    'INTERRO',
+    'PROJET',
+    'TD',
+    'TP',
+    'EXERCICES'
 ];
 
 export const normalizeWorkTypes = (input?: unknown) => {
-    const items: WorkTypeInput[] = Array.isArray(input)
-        ? input.map((item) =>
-            typeof item === 'string' ? { type: item as WorkType } : (item as WorkTypeInput)
+    const items: any[] = Array.isArray(input)
+        ? input.map((item: any) =>
+            typeof item === 'string' ? { type: item } : item
         )
         : [];
 
     const rawTypes = items.map((item) => item?.type).filter(Boolean);
-    const requested = rawTypes.filter((type): type is WorkType => !!type && ALL_WORK_TYPES.includes(type as WorkType));
+    const requested = rawTypes.filter((type): type is any => !!type && ALL_WORK_TYPES.includes(type));
+    
     if (rawTypes.length > 0 && requested.length !== rawTypes.length) {
         return {
             ok: false as const,
@@ -31,18 +25,14 @@ export const normalizeWorkTypes = (input?: unknown) => {
     }
 
     const uniqueTypes = Array.from(new Set(requested));
-    const hasExam = uniqueTypes.includes(WorkType.EXAMEN);
     if (uniqueTypes.length === 0) {
         return {
             ok: true as const,
-            items: [{ type: WorkType.EXAMEN, weightPercent: 100 }]
-        };
-    }
-
-    if (!hasExam) {
-        return {
-            ok: false as const,
-            error: "Le type EXAMEN est obligatoire"
+            items: [
+                { type: 'EXAMEN', weightPercent: 50 },
+                { type: 'INTERRO', weightPercent: 25 },
+                { type: 'TP', weightPercent: 25 }
+            ]
         };
     }
 
@@ -50,7 +40,7 @@ export const normalizeWorkTypes = (input?: unknown) => {
     const hasAnyWeight = providedWeights.length > 0;
 
     if (hasAnyWeight) {
-        const weightsByType = new Map<WorkType, number>();
+        const weightsByType = new Map<any, number>();
         for (const item of items) {
             if (!item?.type || item.weightPercent === undefined) {
                 return { ok: false as const, error: "Tous les types doivent avoir un pourcentage si un est fourni" };
@@ -83,18 +73,26 @@ export const normalizeWorkTypes = (input?: unknown) => {
     if (uniqueTypes.length === 1) {
         return {
             ok: true as const,
-            items: [{ type: WorkType.EXAMEN, weightPercent: 100 }]
+            items: [{ type: uniqueTypes[0], weightPercent: 100 }]
         };
     }
 
-    const otherTypes = uniqueTypes.filter((type) => type !== WorkType.EXAMEN);
-    const otherWeight = 50 / otherTypes.length;
+    const hasExam = uniqueTypes.includes('EXAMEN');
+    if (hasExam) {
+        const otherTypes = uniqueTypes.filter((type) => type !== 'EXAMEN');
+        const otherWeight = otherTypes.length > 0 ? 50 / otherTypes.length : 0;
+        return {
+            ok: true as const,
+            items: [
+                { type: 'EXAMEN', weightPercent: 50 },
+                ...otherTypes.map((type) => ({ type, weightPercent: otherWeight }))
+            ]
+        };
+    }
+
+    const equalWeight = 100 / uniqueTypes.length;
     return {
         ok: true as const,
-        items: [
-            { type: WorkType.EXAMEN, weightPercent: 50 },
-            ...otherTypes.map((type) => ({ type, weightPercent: otherWeight }))
-        ]
+        items: uniqueTypes.map((type) => ({ type, weightPercent: equalWeight }))
     };
 };
-

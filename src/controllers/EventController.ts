@@ -1,135 +1,128 @@
 import { Request, Response } from 'express';
 import { db } from '../lib/db';
+import { AuthenticatedRequest } from '../middlewares/auth.middleware';
+import { createEventSchema, updateEventSchema } from '../validators/event.validators';
+import { z } from 'zod';
+import { EventService } from '../services/EventService';
+import { sendError, sendSuccess } from '../utils/apiResponse';
+
+const getUserId = (req: Request) => (req as AuthenticatedRequest).user?.userId;
+
+const parseZodError = (error: z.ZodError): string =>
+  error.issues.map((issue) => issue.message).join(', ');
 
 export const getEvents = async (req: Request, res: Response) => {
-    try {
-        const userId = (req as any).user?.userId;
-        const { startDate, endDate } = req.query;
+  try {
+    const userId = getUserId(req);
+    const { startDate, endDate } = req.query;
 
-        if (!userId) return res.status(401).json({ error: "Unauthorized" });
+    if (!userId) return sendError(res, 'Non autorise.', 401, 'UNAUTHORIZED');
 
-        const where: any = { userId };
-        if (startDate && endDate) {
-            where.startDate = {
-                gte: new Date(String(startDate)),
-                lte: new Date(String(endDate))
-            };
-        }
-
-        const events = await db.event.findMany({
-            where,
-            orderBy: { startDate: 'asc' }
-        });
-        res.json(events);
-    } catch (error: any) {
-        res.status(500).json({ error: error.message });
+    const where: Record<string, unknown> = { userId };
+    if (startDate && endDate) {
+      where.startDate = {
+        gte: new Date(String(startDate)),
+        lte: new Date(String(endDate))
+      };
     }
+
+    const events = await db.event.findMany({
+      where,
+      orderBy: { startDate: 'asc' }
+    });
+
+    sendSuccess(res, events);
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Erreur interne';
+    sendError(res, message);
+  }
 };
 
 export const createEvent = async (req: Request, res: Response) => {
-    try {
-        const userId = (req as any).user?.userId;
-        const {
-            title,
-            description,
-            type,
-            startDate,
-            endDate,
-            isAllDay,
-            location,
-            recurrence,
-            courseId,
-            generateDefaultTasks
-        } = req.body;
+  try {
+    const userId = getUserId(req);
+    if (!userId) return sendError(res, 'Non autorise.', 401, 'UNAUTHORIZED');
 
-        if (!userId) return res.status(401).json({ error: "Unauthorized" });
+    const payload = createEventSchema.parse(req.body);
 
-        const event = await db.$transaction(async (tx) => {
-            const createdEvent = await tx.event.create({
-                data: {
-                    userId,
-                    title,
-                    description,
-                    type,
-                    startDate: new Date(startDate),
-                    endDate: new Date(endDate),
-                    isAllDay: isAllDay || false,
-                    location,
-                    recurrence,
-                    courseId
-                }
-            });
+    const eventData = {
+      userId,
+      title: payload.title,
+      description: payload.description,
+      type: payload.type || 'CLASS',
+      startDate: new Date(payload.startDate),
+      endDate: new Date(payload.endDate),
+      isAllDay: payload.isAllDay || false,
+      location: payload.location,
+      recurrence: payload.recurrence,
+      course: payload.courseId ? { connect: { id: payload.courseId } } : undefined
+    };
 
-            if (generateDefaultTasks === true) {
-                const templates = [
-                    { title: 'Preparer le plan de revision', durationMinutes: 25 },
-                    { title: 'Reviser les chapitres cles', durationMinutes: 45 },
-                    { title: 'Faire un entrainement', durationMinutes: 60 },
-                    { title: 'Relecture finale', durationMinutes: 25 }
-                ];
-
-                await tx.task.createMany({
-                    data: templates.map((item, index) => ({
-                        userId,
-                        eventId: createdEvent.id,
-                        courseId: courseId ?? null,
-                        title: item.title,
-                        durationMinutes: item.durationMinutes,
-                        position: index
-                    }))
-                });
-            }
-
-            return createdEvent;
-        });
-
-        res.status(201).json(event);
-    } catch (error: any) {
-        res.status(500).json({ error: error.message });
+    const event = await EventService.createEvent(userId, eventData, payload.generateDefaultTasks);
+    sendSuccess(res, event, 201);
+  } catch (error: unknown) {
+    if (error instanceof z.ZodError) {
+      return sendError(res, parseZodError(error), 400, 'VALIDATION_ERROR');
     }
+    const message = error instanceof Error ? error.message : 'Erreur interne';
+    sendError(res, message);
+  }
 };
 
 export const updateEvent = async (req: Request, res: Response) => {
-    try {
-        const userId = (req as any).user?.userId;
-        const { id } = req.params as any;
-        const data = req.body;
+  try {
+    const userId = getUserId(req);
+    const id = String(req.params.id);
 
-        if (!userId) return res.status(401).json({ error: "Unauthorized" });
+    if (!userId) return sendError(res, 'Non autorise.', 401, 'UNAUTHORIZED');
 
-        const event = await db.event.findUnique({ where: { id } });
-        if (!event || event.userId !== userId) {
-            return res.status(404).json({ error: "Event not found" });
-        }
+    const payload = updateEventSchema.parse(req.body);
 
-        if (data.startDate) data.startDate = new Date(data.startDate);
-        if (data.endDate) data.endDate = new Date(data.endDate);
-
-        const updated = await db.event.update({
-            where: { id },
-            data: { ...data } // Events don't have updatedAt in standard schemas usually, but ours might? let's check schema/types if needed. Schema says "lastModifiedAt"
-        });
-        res.json(updated);
-    } catch (error: any) {
-        res.status(500).json({ error: error.message });
+    const event = await db.event.findUnique({ where: { id } });
+    if (!event || event.userId !== userId) {
+      return sendError(res, 'Evenement introuvable.', 404, 'EVENT_NOT_FOUND');
     }
+
+    const dataToUpdate: Record<string, unknown> = { ...payload };
+    if (payload.startDate) dataToUpdate.startDate = new Date(payload.startDate);
+    if (payload.endDate) dataToUpdate.endDate = new Date(payload.endDate);
+    if (payload.courseId) dataToUpdate.courseId = payload.courseId;
+
+    Object.keys(dataToUpdate).forEach((key) => {
+      if (dataToUpdate[key] === undefined) delete dataToUpdate[key];
+    });
+
+    const updated = await db.event.update({
+      where: { id },
+      data: dataToUpdate
+    });
+
+    sendSuccess(res, updated);
+  } catch (error: unknown) {
+    if (error instanceof z.ZodError) {
+      return sendError(res, parseZodError(error), 400, 'VALIDATION_ERROR');
+    }
+    const message = error instanceof Error ? error.message : 'Erreur interne';
+    sendError(res, message);
+  }
 };
 
 export const deleteEvent = async (req: Request, res: Response) => {
-    try {
-        const userId = (req as any).user?.userId;
-        const { id } = req.params as any;
+  try {
+    const userId = getUserId(req);
+    const id = String(req.params.id);
 
-        if (!userId) return res.status(401).json({ error: "Unauthorized" });
+    if (!userId) return sendError(res, 'Non autorise.', 401, 'UNAUTHORIZED');
 
-        const event = await db.event.findUnique({ where: { id } });
-        if (!event || event.userId !== userId) {
-            return res.status(404).json({ error: "Event not found" });
-        }
-
-        await db.event.delete({ where: { id } }); // Hard delete for events as per typical calendar behavior, or we could add soft delete if schema supports it. Schema has no isDeleted for Events, so Hard delete.
-        res.json({ message: "Event deleted successfully" });
-    } catch (error: any) {
-        res.status(500).json({ error: error.message });
+    const event = await db.event.findUnique({ where: { id } });
+    if (!event || event.userId !== userId) {
+      return sendError(res, 'Evenement introuvable.', 404, 'EVENT_NOT_FOUND');
     }
+
+    await db.event.delete({ where: { id } });
+    sendSuccess(res, { message: 'Evenement supprime avec succes.' });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Erreur interne';
+    sendError(res, message);
+  }
 };

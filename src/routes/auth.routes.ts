@@ -1,57 +1,22 @@
-import { Router, Request, Response } from 'express';
+import { Router } from 'express';
 import { register, login, ResetPassword, forgotPassword, logout, RefreshToken } from '../controllers/AuthController';
 import {
   registerSchema,
   loginSchema,
   refreshTokenSchema,
+  logoutSchema,
   forgotPasswordSchema,
   resetPasswordSchema
 } from '../validators/auth.validators';
+import { validate } from '../middlewares/validate.middleware';
 
 const router = Router();
 
-router.post('/register', async (req: Request, res: Response) => {
-  const parsed = registerSchema.safeParse(req.body);
-  if (!parsed.success) {
-    return res.status(400).json({ error: parsed.error.flatten() });
-  }
-  await register(req, res);
-});
-
-router.post('/login', async (req: Request, res: Response) => {
-  const parsed = loginSchema.safeParse(req.body);
-  if (!parsed.success) {
-    return res.status(400).json({ error: parsed.error.flatten() });
-  }
-  await login(req, res);
-});
-
-router.post('/refresh-token', async (req: Request, res: Response) => {
-  const parsed = refreshTokenSchema.safeParse(req.body);
-  if (!parsed.success) {
-    return res.status(400).json({ error: parsed.error.flatten() });
-  }
-  await RefreshToken(req, res);
-});
-
-router.post('/logout', async (req: Request, res: Response) => {
-  await logout(req, res);
-});
-
-router.post('/forgot-password', async (req: Request, res: Response) => {
-  const parsed = forgotPasswordSchema.safeParse(req.body);
-  if (!parsed.success) {
-    return res.status(400).json({ error: parsed.error.flatten() });
-  }
-  await forgotPassword(req, res);
-});
-
-router.post('/reset-password', async (req: Request, res: Response) => {
-  const parsed = resetPasswordSchema.safeParse(req.body);
-  if (!parsed.success) {
-    return res.status(400).json({ error: parsed.error.flatten() });
-  }
-  await ResetPassword(req, res);
-});
+router.post('/register', validate({ body: registerSchema }), register);
+router.post('/login', validate({ body: loginSchema }), login);
+router.post('/refresh-token', validate({ body: refreshTokenSchema }), RefreshToken);
+router.post('/logout', validate({ body: logoutSchema }), logout);
+router.post('/forgot-password', validate({ body: forgotPasswordSchema }), forgotPassword);
+router.post('/reset-password', validate({ body: resetPasswordSchema }), ResetPassword);
 
 export default router;

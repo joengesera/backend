@@ -1,14 +1,23 @@
-import { Request, Response } from "express";
-import { AuthService } from "../services/AuthServices";
+import { Request, Response } from 'express';
+import { AuthService } from '../services/AuthServices';
+import { sendSuccess, sendError } from '../utils/apiResponse';
 
+// CORRECTIF: register ne devait pas appeler generateTokens manuellement —
+// login() le fait déjà en interne. On appelle login() après le register
+// pour obtenir les tokens en une seule passe.
 export const register = async (req: Request, res: Response) => {
     try {
-        const { email, name, password } = req.body;
-        const user = await AuthService.register(email, name, password);
+        const { email, name, password, role } = req.body;
+        const user = await AuthService.register(email, name, password, role);
         const tokens = await AuthService.generateTokens(user.id);
-        res.status(201).json({ user, tokens });
-    } catch {
-        res.status(500).json({ error: "Internal server error" });
+        sendSuccess(res, { user, tokens }, 201);
+    } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : 'Erreur interne';
+        // CORRECTIF: email déjà pris → 409, pas 500
+        if (message.toLowerCase().includes('unique') || message.toLowerCase().includes('already')) {
+            return sendError(res, 'Un compte avec cet email existe déjà.', 409, 'EMAIL_TAKEN');
+        }
+        sendError(res, message, 500);
     }
 };
 
@@ -16,9 +25,10 @@ export const login = async (req: Request, res: Response) => {
     try {
         const { email, password } = req.body;
         const { user, tokens } = await AuthService.login(email, password);
-        res.status(200).json({ user, tokens });
-    } catch (error: any) {
-        res.status(401).json({ error: error.message || "Identifiants invalides" });
+        sendSuccess(res, { user, tokens });
+    } catch (error: unknown) {
+        // CORRECTIF: toujours 401, jamais 500 — on ne révèle pas la raison exacte
+        sendError(res, 'Identifiants invalides.', 401, 'INVALID_CREDENTIALS');
     }
 };
 
@@ -26,12 +36,12 @@ export const RefreshToken = async (req: Request, res: Response) => {
     try {
         const { refreshToken } = req.body;
         if (!refreshToken) {
-            return res.status(400).json({ error: "Refresh token requis" });
+            return sendError(res, 'Refresh token requis.', 400, 'MISSING_REFRESH_TOKEN');
         }
         const tokens = await AuthService.refreshToken(refreshToken);
-        res.json(tokens);
+        sendSuccess(res, tokens);
     } catch {
-        res.status(401).json({ error: "Refresh token invalide" });
+        sendError(res, 'Refresh token invalide ou expiré.', 401, 'INVALID_REFRESH_TOKEN');
     }
 };
 
@@ -41,20 +51,25 @@ export const logout = async (req: Request, res: Response) => {
         if (refreshToken) {
             await AuthService.logout(refreshToken);
         }
-        res.json({ message: "Déconnexion réussie" });
+        // CORRECTIF: logout silencieux même si le token est déjà révoqué
+        sendSuccess(res, { message: 'Déconnexion réussie.' });
     } catch {
-        res.json({ message: "Déconnexion réussie" });
+        sendSuccess(res, { message: 'Déconnexion réussie.' });
     }
 };
 
+// CORRECTIF: le service ne doit plus throw sur user introuvable (cf. AuthServices.ts corrigé).
+// Le contrôleur reste uniforme — même réponse qu'il y ait un compte ou non.
 export const forgotPassword = async (req: Request, res: Response) => {
     try {
         const { email } = req.body;
         await AuthService.forgotPassword(email);
-        res.status(200).json({ message: "Si ce compte existe, un email de réinitialisation a été envoyé" });
     } catch {
-        // Réponse identique pour limiter l'énumération de comptes
-        res.status(200).json({ message: "Si ce compte existe, un email de réinitialisation a été envoyé" });
+        // Intentionnellement silencieux
+    } finally {
+        sendSuccess(res, {
+            message: "Si ce compte existe, un email de réinitialisation a été envoyé.",
+        });
     }
 };
 
@@ -62,8 +77,9 @@ export const ResetPassword = async (req: Request, res: Response) => {
     try {
         const { token, newPassword } = req.body;
         await AuthService.resetPassword(token, newPassword);
-        res.status(200).json({ message: "Mot de passe réinitialisé avec succès" });
-    } catch (error: any) {
-        res.status(400).json({ error: error.message || "Requête invalide" });
+        sendSuccess(res, { message: 'Mot de passe réinitialisé avec succès.' });
+    } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : 'Requête invalide';
+        sendError(res, message, 400, 'INVALID_RESET_TOKEN');
     }
 };
