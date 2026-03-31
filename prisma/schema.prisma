@@ -82,19 +82,41 @@ model Task {
   updatedAt      DateTime     @updatedAt
   userId         String
   courseId       String?
+  eventId        String?
+  durationMinutes Int?
+  startedAt      DateTime?
+  timeSpentMinutes Int        @default(0)
   syncStatus     SyncStatus   @default(SYNCED)
   lastModifiedAt DateTime     @default(now())
   version        Int          @default(1)
   deletedAt      DateTime?
+  position       Int          @default(0)
   isDeleted      Boolean      @default(false)
   course         Course?      @relation(fields: [courseId], references: [id], onDelete: Cascade)
   user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  event          Event?       @relation(fields:[eventId], references:[id], onDelete:SetNull)
+  sessions       TaskSession[]
 
   @@index([userId, status])
   @@index([userId, dueDate])
   @@index([userId, syncStatus])
   @@index([userId, courseId])
+  @@index([userId, eventId])
+  @@index([eventId, position])
   @@map("tasks")
+}
+
+model TaskSession {
+  id            String @id  @default(uuid())
+  taskId        String
+  startedAt     DateTime
+  endDate       DateTime?
+  durationSeconds Int @default(0)
+  createdAt     DateTime  @default(now())
+  task          Task      @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([taskId])
 }
 
 model Event {
@@ -115,6 +137,8 @@ model Event {
   version        Int        @default(1)
   course         Course?    @relation(fields: [courseId], references: [id], onDelete: Cascade)
   user           User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  tasks          Task[]
 
   @@index([userId, startDate])
   @@index([userId, type])

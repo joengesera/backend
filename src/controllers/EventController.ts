@@ -29,24 +29,60 @@ export const getEvents = async (req: Request, res: Response) => {
 export const createEvent = async (req: Request, res: Response) => {
     try {
         const userId = (req as any).user?.userId;
-        const { title, description, type, startDate, endDate, isAllDay, location, recurrence, courseId } = req.body;
+        const {
+            title,
+            description,
+            type,
+            startDate,
+            endDate,
+            isAllDay,
+            location,
+            recurrence,
+            courseId,
+            generateDefaultTasks
+        } = req.body;
 
         if (!userId) return res.status(401).json({ error: "Unauthorized" });
 
-        const event = await db.event.create({
-            data: {
-                userId,
-                title,
-                description,
-                type,
-                startDate: new Date(startDate),
-                endDate: new Date(endDate),
-                isAllDay: isAllDay || false,
-                location,
-                recurrence,
-                courseId
+        const event = await db.$transaction(async (tx) => {
+            const createdEvent = await tx.event.create({
+                data: {
+                    userId,
+                    title,
+                    description,
+                    type,
+                    startDate: new Date(startDate),
+                    endDate: new Date(endDate),
+                    isAllDay: isAllDay || false,
+                    location,
+                    recurrence,
+                    courseId
+                }
+            });
+
+            if (generateDefaultTasks === true) {
+                const templates = [
+                    { title: 'Preparer le plan de revision', durationMinutes: 25 },
+                    { title: 'Reviser les chapitres cles', durationMinutes: 45 },
+                    { title: 'Faire un entrainement', durationMinutes: 60 },
+                    { title: 'Relecture finale', durationMinutes: 25 }
+                ];
+
+                await tx.task.createMany({
+                    data: templates.map((item, index) => ({
+                        userId,
+                        eventId: createdEvent.id,
+                        courseId: courseId ?? null,
+                        title: item.title,
+                        durationMinutes: item.durationMinutes,
+                        position: index
+                    }))
+                });
             }
+
+            return createdEvent;
         });
+
         res.status(201).json(event);
     } catch (error: any) {
         res.status(500).json({ error: error.message });
