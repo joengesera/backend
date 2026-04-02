@@ -27,7 +27,7 @@ export class EventService {
           data: templates.map((item, index) => ({
             userId,
             eventId: createdEvent.id,
-            courseId: data.course?.connect?.id || null, // Best effort
+            courseId: (data.courseId || data.course?.connect?.id) || null, // Best effort
             title: item.title,
             durationMinutes: item.durationMinutes,
             position: index,

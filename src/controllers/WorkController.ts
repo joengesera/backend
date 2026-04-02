@@ -107,6 +107,23 @@ export const createWork = async (req: Request, res: Response) => {
       include: { workType: { select: { type: true, weightPercent: true } } },
     });
 
+    if (work.status === 'GRADED' && work.pointsEarned !== null) {
+      await db.grade.create({
+        data: {
+          userId,
+          courseId: work.courseId,
+          workId: work.id,
+          score: work.pointsEarned,
+          maxScore: work.pointsPossible,
+          percentage: work.percentage,
+          workTypeLabel: work.workTypeLabel,
+          workTypeId: work.workTypeId,
+          date: work.gradedAt || new Date(),
+          name: work.title,
+        }
+      });
+    }
+
     sendSuccess(res, work, 201);
   } catch (error: unknown) {
     if (error instanceof z.ZodError) {
@@ -194,6 +211,44 @@ export const updateWork = async (req: Request, res: Response) => {
       include: { workType: { select: { type: true, weightPercent: true } } },
     });
 
+    if (updated.status === 'GRADED' && updated.pointsEarned !== null) {
+      const existingGrade = await db.grade.findFirst({ where: { workId: updated.id, userId } });
+      if (existingGrade) {
+        await db.grade.update({
+          where: { id: existingGrade.id },
+          data: {
+            score: updated.pointsEarned,
+            maxScore: updated.pointsPossible,
+            percentage: updated.percentage,
+            workTypeLabel: updated.workTypeLabel,
+            workTypeId: updated.workTypeId,
+            date: updated.gradedAt || updated.lastModifiedAt,
+            name: updated.title,
+            courseId: updated.courseId,
+          }
+        });
+      } else {
+        await db.grade.create({
+          data: {
+            userId,
+            courseId: updated.courseId,
+            workId: updated.id,
+            score: updated.pointsEarned,
+            maxScore: updated.pointsPossible,
+            percentage: updated.percentage,
+            workTypeLabel: updated.workTypeLabel,
+            workTypeId: updated.workTypeId,
+            date: updated.gradedAt || updated.lastModifiedAt,
+            name: updated.title,
+          }
+        });
+      }
+    } else {
+      await db.grade.deleteMany({
+        where: { workId: updated.id, userId }
+      });
+    }
+
     sendSuccess(res, updated);
   } catch (error: unknown) {
     if (error instanceof z.ZodError) {
@@ -215,6 +270,7 @@ export const deleteWork = async (req: Request, res: Response) => {
       return sendError(res, 'Travail introuvable.', 404, 'WORK_NOT_FOUND');
     }
 
+    await db.grade.deleteMany({ where: { workId: id, userId } });
     await db.work.delete({ where: { id } });
     sendSuccess(res, { message: 'Travail supprimé avec succès.' });
   } catch (error: unknown) {

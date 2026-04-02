@@ -52,19 +52,20 @@ export const createEvent = async (req: Request, res: Response) => {
       type: payload.type || 'CLASS',
       startDate: new Date(payload.startDate),
       endDate: new Date(payload.endDate),
-      isAllDay: payload.isAllDay || false,
+      isAllDay: !!payload.isAllDay,
       location: payload.location,
       recurrence: payload.recurrence,
-      course: payload.courseId ? { connect: { id: payload.courseId } } : undefined
+      courseId: payload.courseId || undefined // Utilisation directe du scalaire
     };
 
     const event = await EventService.createEvent(userId, eventData, payload.generateDefaultTasks);
     sendSuccess(res, event, 201);
   } catch (error: unknown) {
+    console.error('[EventController] Create Error:', error); // Log crucial pour le terminal
     if (error instanceof z.ZodError) {
       return sendError(res, parseZodError(error), 400, 'VALIDATION_ERROR');
     }
-    const message = error instanceof Error ? error.message : 'Erreur interne';
+    const message = error instanceof Error ? error.message : 'Erreur interne lors de la création de l\'événement';
     sendError(res, message);
   }
 };

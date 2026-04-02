@@ -5,6 +5,7 @@ import { sendSuccess, sendError } from '../utils/apiResponse';
 // CORRECTIF: register ne devait pas appeler generateTokens manuellement —
 // login() le fait déjà en interne. On appelle login() après le register
 // pour obtenir les tokens en une seule passe.
+
 export const register = async (req: Request, res: Response) => {
     try {
         const { email, name, password, role } = req.body;
@@ -13,7 +14,6 @@ export const register = async (req: Request, res: Response) => {
         sendSuccess(res, { user, tokens }, 201);
     } catch (error: unknown) {
         const message = error instanceof Error ? error.message : 'Erreur interne';
-        // CORRECTIF: email déjà pris → 409, pas 500
         if (message.toLowerCase().includes('unique') || message.toLowerCase().includes('already')) {
             return sendError(res, 'Un compte avec cet email existe déjà.', 409, 'EMAIL_TAKEN');
         }
@@ -27,7 +27,6 @@ export const login = async (req: Request, res: Response) => {
         const { user, tokens } = await AuthService.login(email, password);
         sendSuccess(res, { user, tokens });
     } catch (error: unknown) {
-        // CORRECTIF: toujours 401, jamais 500 — on ne révèle pas la raison exacte
         sendError(res, 'Identifiants invalides.', 401, 'INVALID_CREDENTIALS');
     }
 };
