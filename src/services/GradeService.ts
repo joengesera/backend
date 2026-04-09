@@ -1,30 +1,24 @@
 import { db } from '../lib/db';
+import { PointsEngineService } from './PointsEngineService';
 
 export class GradeService {
+    private static getGradeTypeLabel(grade: any): string {
+        return PointsEngineService.getTypeLabel(grade);
+    }
     /**
      * Calculate weighted average for a specific course
      */
     static async getCourseAverage(userId: string, courseId: string) {
         const grades = await db.grade.findMany({
             where: { userId, courseId },
-            include: { course: true }
+            include: { course: true, workType: true }
         });
 
         if (grades.length === 0) {
             return null;
         }
 
-        let totalWeightedScore = 0;
-        let totalWeight = 0;
-
-        grades.forEach(grade => {
-            const percentage = (grade.score / grade.maxScore) * 20;
-            const weight = grade.weight || 1.0;
-            totalWeightedScore += percentage * weight;
-            totalWeight += weight;
-        });
-
-        const average = totalWeight > 0 ? totalWeightedScore / totalWeight : 0;
+        const average = PointsEngineService.calculatePercentageBasedAverage(grades);
 
         return {
             courseId,
@@ -32,12 +26,13 @@ export class GradeService {
             courseCode: grades[0].course?.code || 'N/A',
             average: Math.round(average * 100) / 100,
             gradeCount: grades.length,
-            grades: grades.map(g => ({
+            grades: grades.map((g: any) => ({
                 name: g.name,
                 score: g.score,
                 maxScore: g.maxScore,
-                weight: g.weight,
-                normalized: Math.round((g.score / g.maxScore) * 20 * 100) / 100
+                workType: this.getGradeTypeLabel(g),
+                workTypePercent: g.percentage ?? null,
+                normalized: Math.round(PointsEngineService.normalizeToTwenty(g.score, g.maxScore) * 100) / 100
             }))
         };
     }
@@ -48,7 +43,7 @@ export class GradeService {
     static async getGeneralAverage(userId: string) {
         const grades = await db.grade.findMany({
             where: { userId },
-            include: { course: true }
+            include: { course: true, workType: true }
         });
 
         if (grades.length === 0) {
@@ -62,7 +57,7 @@ export class GradeService {
         }
 
         // Group grades by course
-        const gradesByCourse = grades.reduce((acc, grade) => {
+        const gradesByCourse = grades.reduce((acc: any, grade: any) => {
             const courseId = grade.courseId;
             if (!acc[courseId]) {
                 acc[courseId] = [];
@@ -71,26 +66,17 @@ export class GradeService {
             return acc;
         }, {} as Record<string, typeof grades>);
 
+        const courseIds = Object.keys(gradesByCourse);
         // Calculate average for each course
         const courseAverages = Object.entries(gradesByCourse).map(([courseId, courseGrades]) => {
-            let totalWeightedScore = 0;
-            let totalWeight = 0;
-
-            courseGrades.forEach(grade => {
-                const percentage = (grade.score / grade.maxScore) * 20;
-                const weight = grade.weight || 1.0;
-                totalWeightedScore += percentage * weight;
-                totalWeight += weight;
-            });
-
-            const average = totalWeight > 0 ? totalWeightedScore / totalWeight : 0;
+            const average = PointsEngineService.calculatePercentageBasedAverage(courseGrades as any[]);
 
             return {
                 courseId,
-                courseName: courseGrades[0].course?.name || 'Unknown',
-                courseCode: courseGrades[0].course?.code || 'N/A',
+                courseName: (courseGrades as any)[0].course?.name || 'Unknown',
+                courseCode: (courseGrades as any)[0].course?.code || 'N/A',
                 average: Math.round(average * 100) / 100,
-                gradeCount: courseGrades.length
+                gradeCount: (courseGrades as any).length
             };
         });
 
@@ -125,11 +111,11 @@ export class GradeService {
         }
 
         // Normalize all grades to /20
-        const normalizedGrades = grades.map(g => (g.score / g.maxScore) * 20);
+        const normalizedGrades = grades.map((g: any) => (g.score / g.maxScore) * 20);
 
         // Calculate statistics
-        const sorted = [...normalizedGrades].sort((a, b) => a - b);
-        const sum = normalizedGrades.reduce((a, b) => a + b, 0);
+        const sorted = [...normalizedGrades].sort((a: any, b: any) => a - b);
+        const sum = normalizedGrades.reduce((a: any, b: any) => a + b, 0);
         const mean = sum / normalizedGrades.length;
         
         const median = sorted.length % 2 === 0
@@ -140,16 +126,16 @@ export class GradeService {
         const max = Math.max(...normalizedGrades);
 
         // Standard deviation
-        const variance = normalizedGrades.reduce((acc, val) => acc + Math.pow(val - mean, 2), 0) / normalizedGrades.length;
+        const variance = normalizedGrades.reduce((acc: any, val: any) => acc + Math.pow(val - mean, 2), 0) / normalizedGrades.length;
         const standardDeviation = Math.sqrt(variance);
 
         // Grade distribution
         const distribution = {
-            excellent: normalizedGrades.filter(g => g >= 16).length,  // 16-20
-            good: normalizedGrades.filter(g => g >= 14 && g < 16).length,  // 14-16
-            average: normalizedGrades.filter(g => g >= 12 && g < 14).length,  // 12-14
-            passing: normalizedGrades.filter(g => g >= 10 && g < 12).length,  // 10-12
-            failing: normalizedGrades.filter(g => g < 10).length  // <10
+            excellent: normalizedGrades.filter((g: any) => g >= 16).length,  // 16-20
+            good: normalizedGrades.filter((g: any) => g >= 14 && g < 16).length,  // 14-16
+            average: normalizedGrades.filter((g: any) => g >= 12 && g < 14).length,  // 12-14
+            passing: normalizedGrades.filter((g: any) => g >= 10 && g < 12).length,  // 10-12
+            failing: normalizedGrades.filter((g: any) => g < 10).length  // <10
         };
 
         return {

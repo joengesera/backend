@@ -1,127 +1,177 @@
-import bcrypt from 'bcrypt';
+﻿import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
-import { db } from '../lib/db';
 import crypto from 'crypto';
+import { db } from '../lib/db';
 import { EmailService } from './emailService';
 
+const SALT_ROUNDS = 12; // CORRECTIF: 10 est le minimum viable, 12 est recommandé en 2024+
 
-const SALT_ROUNDS = 10;
-const JWT_SECRET: string = String(process.env.JWT_SECRET)
-const JWT_REFRESH_SECRET: string = String(process.env.JWT_REFRESH_SECRET)
+function getJwtSecret(): string {
+    const secret = process.env.JWT_SECRET;
+    if (!secret) throw new Error('JWT_SECRET must be defined');
+    return secret;
+}
 
-if (!JWT_SECRET || !JWT_REFRESH_SECRET) {
-    throw new Error("JWT_SECRET or JWT_REFRESH_SECRET must be defined")
+function getRefreshJwtSecret(): string {
+    const secret = process.env.JWT_REFRESH_SECRET;
+    if (!secret) throw new Error('JWT_REFRESH_SECRET must be defined');
+    return secret;
+}
+
+function hashResetToken(token: string): string {
+    return crypto.createHash('sha256').update(token).digest('hex');
 }
 
 export class AuthService {
-
-    // Génération des tokens
     static async generateTokens(userId: string) {
-        const accessToken = jwt.sign({ userId }, JWT_SECRET, { expiresIn: '15m' });
-        const refreshToken = jwt.sign({ userId }, JWT_REFRESH_SECRET, { expiresIn: '10d' });
+        const accessToken = jwt.sign({ userId }, getJwtSecret(), { expiresIn: '15m' });
+        const refreshToken = jwt.sign({ userId }, getRefreshJwtSecret(), { expiresIn: '10d' });
 
         await db.refreshToken.create({
             data: {
                 token: refreshToken,
-                userId: userId,
-                expiresAt: new Date(Date.now() + 10 * 24 * 60 * 60 * 1000)
-            }
-        })
+                userId,
+                expiresAt: new Date(Date.now() + 10 * 24 * 60 * 60 * 1000),
+            },
+        });
 
         return { accessToken, refreshToken };
     }
 
-    // Logique de refresh
     static async refreshToken(refreshToken: string) {
-        const payload = jwt.verify(refreshToken, JWT_REFRESH_SECRET) as { userId: string };
-        const dbToken = await db.refreshToken.findUnique({ where: { token: refreshToken } }) as { token: string; userId: string; expiresAt: Date } | null;
+        // CORRECTIF: vérifier en DB AVANT de vérifier la signature JWT
+        // pour invalider immédiatement les tokens révoqués
+        const dbToken = await db.refreshToken.findUnique({
+            where: { token: refreshToken },
+        });
 
-        if (!dbToken || dbToken.expiresAt < new Date(Date.now())) {
-            throw new Error("Token invalide");
+        if (!dbToken || dbToken.expiresAt < new Date()) {
+            throw new Error('Token invalide ou expiré');
         }
-        // On genere un nouvel access token et un nouveau refresh token
-        const tokens = await this.generateTokens(payload.userId);
-        // On supprime le token refresh
+
+        let payload: jwt.JwtPayload;
+        try {
+            payload = jwt.verify(refreshToken, getRefreshJwtSecret()) as jwt.JwtPayload;
+        } catch {
+            // Token DB présent mais signature invalide → révoquer par sécurité
+            await db.refreshToken.delete({ where: { token: refreshToken } });
+            throw new Error('Token invalide');
+        }
+
+        if (!payload.userId || typeof payload.userId !== 'string') {
+            throw new Error('Token invalide');
+        }
+
+        // Rotation: supprimer l'ancien, créer le nouveau
         await db.refreshToken.delete({ where: { token: refreshToken } });
-        return tokens;
+        return this.generateTokens(payload.userId);
     }
 
-    // Logique de logout
-    static async logout(refreshToken: string) {
-        await db.refreshToken.delete({ where: { token: refreshToken } });
-
+    static async logout(refreshToken: string): Promise<void> {
+        // CORRECTIF: ne pas throw si le token n'existe pas (déjà révoqué = OK)
+        await db.refreshToken.deleteMany({ where: { token: refreshToken } });
     }
 
-    // Mot de passe oublie
-    static async forgotPassword(email: string) {
+    static async register(
+        email: string,
+        name: string,
+        password: string,
+        role: 'STUDENT' | 'PROFESSOR' = 'STUDENT'
+    ) {
+        const hashedPassword = await bcrypt.hash(password, SALT_ROUNDS);
+
+        const user = await db.user.create({
+            data: { email, name, passwordHash: hashedPassword, role },
+            select: {
+                id: true,
+                email: true,
+                name: true,
+                role: true,
+                createdAt: true,
+                updatedAt: true,
+            },
+        });
+
+        if (role === 'PROFESSOR') {
+            await db.professor.create({ data: { userId: user.id } });
+        }
+
+        return user;
+    }
+
+    static async login(email: string, password: string) {
         const user = await db.user.findUnique({ where: { email } });
-        if (!user) throw new Error("Utilisateur non trouvé");
+
+        // CORRECTIF: comparer le hash même si l'utilisateur n'existe pas
+        // pour éviter le timing attack (user enumeration via temps de réponse)
+        const DUMMY_HASH = '$2b$12$invalidhashfortimingprotectiononly.........';
+        const isValid = user
+            ? await bcrypt.compare(password, user.passwordHash)
+            : await bcrypt.compare(password, DUMMY_HASH).then(() => false);
+
+        if (!user || !isValid) {
+            throw new Error('Identifiants invalides');
+        }
+
+        const tokens = await this.generateTokens(user.id);
+
+        return {
+            user: {
+                id: user.id,
+                email: user.email,
+                name: user.name,
+                role: user.role,
+                createdAt: user.createdAt,
+                updatedAt: user.updatedAt,
+            },
+            tokens,
+        };
+    }
+
+    static async forgotPassword(email: string): Promise<void> {
+        const user = await db.user.findUnique({ where: { email } });
+
+        // CORRECTIF: ne plus throw si le user n'existe pas.
+        // Le contrôleur renvoie toujours la même réponse → pas de user enumeration.
+        if (!user) return;
 
         const resetToken = crypto.randomBytes(32).toString('hex');
-        const expiresAt = new Date(Date.now() + 600 * 1000); // 1 heure
+        const hashedResetToken = hashResetToken(resetToken);
+        const expiresAt = new Date(Date.now() + 60 * 60 * 1000);
 
         await db.user.update({
             where: { id: user.id },
-            data: {
-                resetPasswordToken: resetToken,
-                resetPasswordExpiresAt: expiresAt
-            }
+            data: { resetPasswordToken: hashedResetToken, resetPasswordExpiresAt: expiresAt },
         });
 
         await EmailService.sendResetPasswordEmail(email, resetToken);
-
-        return { message: "Email de réinitialisation envoyé" };
-    }
-    // Inscription 
-    static async register(email: string, name: string, password: string) {
-        const hashedPassword = await bcrypt.hash(password, SALT_ROUNDS);
-        const user = await db.user.create({
-            data: {
-                email,
-                name,
-                passwordHash: hashedPassword
-            }
-        });
-        return user;
-    }
-    // Connexion
-    static async login(email: string, password: string) {
-        const user = await db.user.findUnique({ where: { email } });
-        if (!user) throw new Error("Utilisateur non trouvé");
-
-        const isPasswordValid = await bcrypt.compare(password, user.passwordHash);
-        if (!isPasswordValid) throw new Error("Mot de passe incorrect");
-
-        // Génération du token
-        const tokens = await this.generateTokens(user.id);
-
-        return { user, tokens };
     }
 
-    // 
+    static async resetPassword(token: string, newPassword: string): Promise<void> {
+        const hashedToken = hashResetToken(token);
 
-
-    // Reset password 
-    static async resetPassword(token: string, newPassword: string) {
         const user = await db.user.findFirst({
             where: {
-                resetPasswordToken: token,
-                resetPasswordExpiresAt: {
-                    gte: new Date(Date.now())
-                }
-            }
-        }
-        )
-        if (!user) throw new Error("Token invalide");
+                resetPasswordToken: hashedToken,
+                resetPasswordExpiresAt: { gte: new Date() },
+            },
+        });
+
+        if (!user) throw new Error('Token invalide ou expiré');
+
         const hashedPassword = await bcrypt.hash(newPassword, SALT_ROUNDS);
+
         await db.user.update({
             where: { id: user.id },
             data: {
                 passwordHash: hashedPassword,
                 resetPasswordToken: null,
-                resetPasswordExpiresAt: null
-            }
-        })
-        return user;
+                resetPasswordExpiresAt: null,
+            },
+        });
+
+        // CORRECTIF: invalider tous les refresh tokens de l'utilisateur
+        // après un reset de mot de passe (bonne pratique sécurité)
+        await db.refreshToken.deleteMany({ where: { userId: user.id } });
     }
 }

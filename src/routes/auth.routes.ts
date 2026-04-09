@@ -1,60 +1,22 @@
-// src/routes/auth.routes.ts
 import { Router } from 'express';
-import { Request, Response } from 'express';
 import { register, login, ResetPassword, forgotPassword, logout, RefreshToken } from '../controllers/AuthController';
-
+import {
+  registerSchema,
+  loginSchema,
+  refreshTokenSchema,
+  logoutSchema,
+  forgotPasswordSchema,
+  resetPasswordSchema
+} from '../validators/auth.validators';
+import { validate } from '../middlewares/validate.middleware';
 
 const router = Router();
 
-// Inscription : POST /api/auth/register
-router.post('/register', async (req: Request, res: Response) => {
-  try {
-    await register(req, res);
-  } catch (error: any) {
-    res.status(400).json({ error: error.message });
-    console.log(error);
-  }
-});
-
-// Connexion : POST /api/auth/login
-router.post('/login', async (req: Request, res: Response) => {
-  try {
-    await login(req, res);
-  } catch (error: any) {
-    res.status(400).json({ error: error.message });
-  }
-});
-
-// Refresh Token: POST /api/auth/refresh-token
-router.post('/refresh-token', async (req: Request, res: Response) => {
-  await RefreshToken(req, res);
-});
-
-// Logout: POST /api/auth/logout
-router.post('/logout', async (req: Request, res: Response) => {
-  try {
-    logout(req, res);
-  } catch (error: any) {
-    res.status(400).json({ error: error.message });
-  }
-});
-
-// Demande de reinitialisation
-router.post('/forgot-password', async (req: Request, res: Response) => {
-  try {
-    forgotPassword(req, res);
-  } catch (error: any) {
-    res.status(400).json({ error: error.message });
-  }
-});
-
-// Reset Password: POST /api/auth/reset-password
-router.post('/reset-password', async (req: Request, res: Response) => {
-  try {
-    ResetPassword(req, res);
-  } catch (error: any) {
-    res.status(400).json({ error: error.message });
-  }
-});
+router.post('/register', validate({ body: registerSchema }), register);
+router.post('/login', validate({ body: loginSchema }), login);
+router.post('/refresh-token', validate({ body: refreshTokenSchema }), RefreshToken);
+router.post('/logout', validate({ body: logoutSchema }), logout);
+router.post('/forgot-password', validate({ body: forgotPasswordSchema }), forgotPassword);
+router.post('/reset-password', validate({ body: resetPasswordSchema }), ResetPassword);
 
 export default router;

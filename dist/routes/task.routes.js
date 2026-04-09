@@ -36,10 +36,23 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const TaskController = __importStar(require("../controllers/TaskController"));
 const auth_middleware_1 = require("../middlewares/auth.middleware");
+const validate_middleware_1 = require("../middlewares/validate.middleware");
+const task_validators_1 = require("../validators/task.validators");
 const router = (0, express_1.Router)();
 router.use(auth_middleware_1.authenticateToken);
+// Specific static routes first
+router.get('/board', TaskController.getBoardTasks);
+router.get('/focus/current', TaskController.getCurrentFocusTask);
+router.post('/reorder', TaskController.reorderTasks);
+// Specific parameterized routes
+router.get('/event/:eventId', TaskController.getTasksByEvent);
+router.post('/event/:eventId', TaskController.createTaskForEvent);
+router.post('/:id/start', TaskController.startTask);
+router.post('/:id/pause', TaskController.pauseTask);
+router.post('/:id/complete', TaskController.completeTask);
+// Generic routes last
 router.get('/', TaskController.getTasks);
-router.post('/', TaskController.createTask);
-router.patch('/:id', TaskController.updateTask);
+router.post('/', (0, validate_middleware_1.validate)({ body: task_validators_1.createTaskSchema }), TaskController.createTask);
+router.patch('/:id', (0, validate_middleware_1.validate)({ body: task_validators_1.updateTaskSchema }), TaskController.updateTask);
 router.delete('/:id', TaskController.deleteTask);
 exports.default = router;

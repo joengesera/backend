@@ -1,4 +1,4 @@
-import { db } from "@/lib/db";
+import { db } from "../lib/db";
 import jwt from "jsonwebtoken";
 import crypto from "crypto";
 import { EmailService } from "./emailService";

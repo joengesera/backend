@@ -2,39 +2,36 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.GradeService = void 0;
 const db_1 = require("../lib/db");
+const PointsEngineService_1 = require("./PointsEngineService");
 class GradeService {
+    static getGradeTypeLabel(grade) {
+        return PointsEngineService_1.PointsEngineService.getTypeLabel(grade);
+    }
     /**
      * Calculate weighted average for a specific course
      */
     static async getCourseAverage(userId, courseId) {
         const grades = await db_1.db.grade.findMany({
             where: { userId, courseId },
-            include: { course: true }
+            include: { course: true, workType: true }
         });
         if (grades.length === 0) {
             return null;
         }
-        let totalWeightedScore = 0;
-        let totalWeight = 0;
-        grades.forEach(grade => {
-            const percentage = (grade.score / grade.maxScore) * 20;
-            const weight = grade.weight || 1.0;
-            totalWeightedScore += percentage * weight;
-            totalWeight += weight;
-        });
-        const average = totalWeight > 0 ? totalWeightedScore / totalWeight : 0;
+        const average = PointsEngineService_1.PointsEngineService.calculatePercentageBasedAverage(grades);
         return {
             courseId,
             courseName: grades[0].course?.name || 'Unknown',
             courseCode: grades[0].course?.code || 'N/A',
             average: Math.round(average * 100) / 100,
             gradeCount: grades.length,
-            grades: grades.map(g => ({
+            grades: grades.map((g) => ({
                 name: g.name,
                 score: g.score,
                 maxScore: g.maxScore,
-                weight: g.weight,
-                normalized: Math.round((g.score / g.maxScore) * 20 * 100) / 100
+                workType: this.getGradeTypeLabel(g),
+                workTypePercent: g.percentage ?? null,
+                normalized: Math.round(PointsEngineService_1.PointsEngineService.normalizeToTwenty(g.score, g.maxScore) * 100) / 100
             }))
         };
     }
@@ -44,7 +41,7 @@ class GradeService {
     static async getGeneralAverage(userId) {
         const grades = await db_1.db.grade.findMany({
             where: { userId },
-            include: { course: true }
+            include: { course: true, workType: true }
         });
         if (grades.length === 0) {
             return {
@@ -64,17 +61,10 @@ class GradeService {
             acc[courseId].push(grade);
             return acc;
         }, {});
+        const courseIds = Object.keys(gradesByCourse);
         // Calculate average for each course
         const courseAverages = Object.entries(gradesByCourse).map(([courseId, courseGrades]) => {
-            let totalWeightedScore = 0;
-            let totalWeight = 0;
-            courseGrades.forEach(grade => {
-                const percentage = (grade.score / grade.maxScore) * 20;
-                const weight = grade.weight || 1.0;
-                totalWeightedScore += percentage * weight;
-                totalWeight += weight;
-            });
-            const average = totalWeight > 0 ? totalWeightedScore / totalWeight : 0;
+            const average = PointsEngineService_1.PointsEngineService.calculatePercentageBasedAverage(courseGrades);
             return {
                 courseId,
                 courseName: courseGrades[0].course?.name || 'Unknown',
@@ -110,7 +100,7 @@ class GradeService {
             };
         }
         // Normalize all grades to /20
-        const normalizedGrades = grades.map(g => (g.score / g.maxScore) * 20);
+        const normalizedGrades = grades.map((g) => (g.score / g.maxScore) * 20);
         // Calculate statistics
         const sorted = [...normalizedGrades].sort((a, b) => a - b);
         const sum = normalizedGrades.reduce((a, b) => a + b, 0);
@@ -125,11 +115,11 @@ class GradeService {
         const standardDeviation = Math.sqrt(variance);
         // Grade distribution
         const distribution = {
-            excellent: normalizedGrades.filter(g => g >= 16).length, // 16-20
-            good: normalizedGrades.filter(g => g >= 14 && g < 16).length, // 14-16
-            average: normalizedGrades.filter(g => g >= 12 && g < 14).length, // 12-14
-            passing: normalizedGrades.filter(g => g >= 10 && g < 12).length, // 10-12
-            failing: normalizedGrades.filter(g => g < 10).length // <10
+            excellent: normalizedGrades.filter((g) => g >= 16).length, // 16-20
+            good: normalizedGrades.filter((g) => g >= 14 && g < 16).length, // 14-16
+            average: normalizedGrades.filter((g) => g >= 12 && g < 14).length, // 12-14
+            passing: normalizedGrades.filter((g) => g >= 10 && g < 12).length, // 10-12
+            failing: normalizedGrades.filter((g) => g < 10).length // <10
         };
         return {
             stats: {

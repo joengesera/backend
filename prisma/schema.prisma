@@ -22,10 +22,13 @@ model User {
   resetPasswordToken     String?
   courses                Course[]
   events                 Event[]
+  works                  Work[]
   grades                 Grade[]
   refreshTokens          RefreshToken[]
   syncHistories          SyncHistory[]
   tasks                  Task[]
+  role                   Role           @default(STUDENT)
+  professor              Professor?
 
   @@index([email])
   @@map("users")
@@ -46,53 +49,81 @@ model RefreshToken {
 }
 
 model Course {
-  id          String    @id @default(uuid())
+  id          String           @id @default(uuid())
   code        String
   name        String
   description String?
-  color       String    @default("#3B82F6")
-  credits     Int?      @default(3)
+  color       String           @default("#3B82F6")
+  credits     Int?             @default(3)
   userId      String
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-  isDeleted   Boolean   @default(false)
+  professorId String?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  isDeleted   Boolean          @default(false)
   deletedAt   DateTime?
-  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user        User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  professor   Professor?       @relation(fields: [professorId], references: [id], onDelete: SetNull)
   events      Event[]
+  works       Work[]
   grades      Grade[]
   tasks       Task[]
+  workTypes   CourseWorkType[]
+  syncStatus  SyncStatus       @default(SYNCED)
 
   @@unique([userId, code])
   @@index([userId])
+  @@index([professorId])
   @@map("courses")
 }
 
 model Task {
-  id             String       @id @default(uuid())
-  localId        String?      @unique
-  title          String
-  description    String?
-  status         TaskStatus   @default(PENDING)
-  priority       TaskPriority @default(MEDIUM)
-  dueDate        DateTime?
-  completedAt    DateTime?
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
-  userId         String
-  courseId       String?
-  syncStatus     SyncStatus   @default(SYNCED)
-  lastModifiedAt DateTime     @default(now())
-  version        Int          @default(1)
-  deletedAt      DateTime?
-  isDeleted      Boolean      @default(false)
-  course         Course?      @relation(fields: [courseId], references: [id], onDelete: Cascade)
-  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id               String       @id @default(uuid())
+  localId          String?      @unique
+  title            String
+  description      String?
+  status           TaskStatus   @default(PENDING)
+  priority         TaskPriority @default(MEDIUM)
+  dueDate          DateTime?
+  completedAt      DateTime?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+  userId           String
+  courseId         String?
+  eventId          String?
+  durationMinutes  Int?
+  startedAt        DateTime?
+  timeSpentMinutes Int          @default(0)
+  syncStatus       SyncStatus   @default(SYNCED)
+  lastModifiedAt   DateTime     @default(now())
+  version          Int          @default(1)
+  deletedAt        DateTime?
+  position         Int          @default(0)
+  isDeleted        Boolean      @default(false)
+  course           Course?      @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  user             User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  event    Event?        @relation(fields: [eventId], references: [id], onDelete: SetNull)
+  sessions TaskSession[]
 
   @@index([userId, status])
   @@index([userId, dueDate])
   @@index([userId, syncStatus])
   @@index([userId, courseId])
+  @@index([userId, eventId])
+  @@index([eventId, position])
   @@map("tasks")
+}
+
+model TaskSession {
+  id              String    @id @default(uuid())
+  taskId          String
+  startedAt       DateTime
+  endDate         DateTime?
+  durationSeconds Int       @default(0)
+  createdAt       DateTime  @default(now())
+  task            Task      @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([taskId])
 }
 
 model Event {
@@ -114,6 +145,9 @@ model Event {
   course         Course?    @relation(fields: [courseId], references: [id], onDelete: Cascade)
   user           User       @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  tasks Task[]
+  works Work[]
+
   @@index([userId, startDate])
   @@index([userId, type])
   @@index([userId, syncStatus])
@@ -121,27 +155,88 @@ model Event {
 }
 
 model Grade {
-  id             String     @id @default(uuid())
-  localId        String?    @unique
+  id             String          @id @default(uuid())
+  localId        String?         @unique
   name           String
   score          Float
-  maxScore       Float      @default(20.0)
-  weight         Float?     @default(1.0)
+  maxScore       Float           @default(20.0)
+  percentage     Float?
+  weight         Float?          @default(1.0)
+  workTypeLabel  String?
+  workId         String?
   date           DateTime?
   comment        String?
-  createdAt      DateTime   @default(now())
-  updatedAt      DateTime   @updatedAt
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
   userId         String
   courseId       String
-  syncStatus     SyncStatus @default(SYNCED)
-  lastModifiedAt DateTime   @default(now())
-  version        Int        @default(1)
-  course         Course     @relation(fields: [courseId], references: [id], onDelete: Cascade)
-  user           User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workTypeId     String?
+  syncStatus     SyncStatus      @default(SYNCED)
+  lastModifiedAt DateTime        @default(now())
+  version        Int             @default(1)
+  course         Course          @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  workType       CourseWorkType? @relation(fields: [workTypeId], references: [id], onDelete: SetNull)
+  work           Work?           @relation(fields: [workId], references: [id], onDelete: SetNull)
+  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, courseId])
   @@index([userId, date])
+  @@index([userId, workId])
+  @@index([courseId, workTypeId])
   @@map("grades")
+}
+
+model CourseWorkType {
+  id            String   @id @default(uuid())
+  courseId      String
+  type          WorkType
+  weightPercent Float
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  course        Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  grades        Grade[]
+  works         Work[]
+
+  @@unique([courseId, type])
+  @@index([courseId])
+  @@map("course_work_types")
+}
+
+model Work {
+  id             String          @id @default(uuid())
+  localId        String?         @unique
+  title          String
+  description    String?
+  status         WorkStatus      @default(PLANNED)
+  dueDate        DateTime?
+  submittedAt    DateTime?
+  gradedAt       DateTime?
+  pointsEarned   Float?
+  pointsPossible Float           @default(20.0)
+  percentage     Float?
+  comment        String?
+  userId         String
+  courseId       String
+  eventId        String?
+  workTypeId     String?
+  workTypeLabel  String?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  syncStatus     SyncStatus      @default(SYNCED)
+  lastModifiedAt DateTime        @default(now())
+  version        Int             @default(1)
+  course         Course          @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  event          Event?          @relation(fields: [eventId], references: [id], onDelete: SetNull)
+  workType       CourseWorkType? @relation(fields: [workTypeId], references: [id], onDelete: SetNull)
+  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  grades         Grade[]
+
+  @@index([userId, courseId])
+  @@index([userId, dueDate])
+  @@index([userId, status])
+  @@index([userId, syncStatus])
+  @@index([courseId, workTypeId])
+  @@map("works")
 }
 
 model SyncHistory {
@@ -179,9 +274,13 @@ enum TaskPriority {
 enum EventType {
   CLASS
   EXAM
+  EXAMEN
+  INTERRO
+  TP
   QUIZ
   ASSIGNMENT
   STUDY
+  AUTRE
   PERSONAL
   MEETING
 }
@@ -190,4 +289,34 @@ enum SyncStatus {
   PENDING
   SYNCED
   CONFLICT
+}
+
+enum WorkType {
+  EXAMEN
+  INTERRO
+  PROJET
+  TD
+  TP
+  EXERCICES
+}
+
+enum WorkStatus {
+  PLANNED
+  SUBMITTED
+  GRADED
+  CANCELLED
+}
+
+enum Role {
+  STUDENT
+  PROFESSOR
+}
+
+model Professor {
+  id      String   @id @default(uuid())
+  userId  String   @unique
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  courses Course[]
+
+  @@map("professors")
 }

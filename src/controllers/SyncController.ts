@@ -1,117 +1,164 @@
-// src/controllers/SyncController.ts
-import { Request, Response } from 'express';
+﻿import { Request, Response } from 'express';
+import { randomUUID } from 'crypto';
 import { db } from '../lib/db';
+import { catchAsync } from '../utils/catchAsync';
+import { ValidationError, UnauthorizedError } from '../errors/http.errors';
+import { logger } from '../utils/logger';
+import { syncPushTask, syncDeleteTask, syncPullTasks, ensureTaskCompatibility } from '../services/TaskSyncService';
+import { EventSyncService } from '../services/EventSyncService';
+import { GradeSyncService } from '../services/GradeSyncService';
+import { WorkSyncService } from '../services/WorkSyncService';
+import { CourseSyncService } from '../services/CourseSyncService';
 
-export const handleSyncPush = async (req: Request, res: Response) => {
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const isValidUuid = (value: unknown) => typeof value === 'string' && UUID_REGEX.test(value);
+const isPrismaDataError = (error: any) => typeof error?.code === 'string' && /^P2\d{3}$/.test(error.code);
 
-    const { type, entity, data } = req.body;
-    const safeUserId = (req as any).user?.userId;
+/**
+ * Handle PUSH synchronization from client
+ */
+export const handleSyncPush = catchAsync(async (req: Request, res: Response) => {
+    const { type, entity, data, deviceId } = req.body;
+    const userId = (req as any).user?.userId;
 
-    if (!safeUserId) return res.status(401).json({ error: "Unauthorized" });
+    if (!userId) throw new UnauthorizedError();
+    if (!isValidUuid(userId)) throw new UnauthorizedError('Token utilisateur invalide');
+    if (!entity || !data?.id) throw new ValidationError('Entite ou ID manquant');
+    if (!['CREATE', 'UPDATE', 'DELETE'].includes(type)) {
+        throw new ValidationError('Type de synchronisation invalide');
+    }
+
+    const normalizedData = { ...data };
+    if (!isValidUuid(normalizedData.id)) {
+        if (type === 'CREATE') {
+            normalizedData.id = randomUUID();
+        } else {
+            throw new ValidationError(`ID invalide pour ${entity}`);
+        }
+    }
+
     try {
-        let result;
-        const modelMap: any = {
-            'Task': db.task,
-            'Event': db.event,
-            'Course': db.course,
-            'Grade': db.grade
-        };
-
-        const model = modelMap[entity];
-        if (!model) return res.status(400).json({ error: "Invalid entity" });
-
-        // Push to History
         await db.syncHistory.create({
             data: {
-                userId: safeUserId,
-                deviceId: req.body.deviceId || 'unknown',
+                userId,
+                deviceId: deviceId || 'unknown',
                 syncType: 'PUSH',
                 status: 'STARTED',
-                itemsPushed: 1 // Single item for now
+                itemsPushed: 1
             }
         });
-
-        if (type === 'CREATE' || type === 'UPDATE') {
-            // Upsert Logic (Last Write Wins)
-            // We need to handle IDs. If client generates UUIDs, we use them.
-            // basic check to ensure data belongs to user
-
-            const payload = { ...data, userId: safeUserId, syncStatus: 'SYNCED', lastModifiedAt: new Date() };
-            // Remove meta fields that might cause issues if they don't match exactly or are read-only
-            delete payload.createdAt;
-            delete payload.updatedAt;
-
-            // Date conversion
-            if (payload.dueDate) payload.dueDate = new Date(payload.dueDate);
-            if (payload.startDate) payload.startDate = new Date(payload.startDate);
-            if (payload.endDate) payload.endDate = new Date(payload.endDate);
-            if (payload.date) payload.date = new Date(payload.date);
-
-
-            result = await model.upsert({
-                where: { id: data.id },
-                update: payload,
-                create: payload
-            });
-        } else if (type === 'DELETE') {
-            // Soft delete if possible, otherwise hard.
-            // Our schema supports soft delete for Tasks, Courses. Not Events, Grades.
-            if (entity === 'Task' || entity === 'Course') {
-                result = await model.update({
-                    where: { id: data.id },
-                    data: { isDeleted: true, deletedAt: new Date(), syncStatus: 'SYNCED' }
-                });
-            } else {
-                result = await model.delete({ where: { id: data.id } });
-            }
-        }
-
-        res.status(200).json({ success: true, syncedAt: new Date() });
-    } catch (error: any) {
-        console.error("Sync Push Error:", error);
-        res.status(500).json({ success: false, error: error.message });
+    } catch (error) {
+        logger.warn({ msg: 'syncHistory PUSH skipped', error });
     }
-};
 
-export const handleSyncPull = async (req: Request, res: Response) => {
-    const safeUserId = (req as any).user?.userId;
-    if (!safeUserId) return res.status(401).json({ error: "Unauthorized" });
-    if (safeUserId !== req.query.userId) {
-        console.warn("Sync Pull Forbidden: userId mismatch");
-        return res.status(403).json({ error: "Forbidden" });
-    }
-    const { lastPulledAt } = req.query;
-    // Client sends the last time it pulled data. We return everything modified since then.
+    let result: any;
 
     try {
-        const since = lastPulledAt ? new Date(String(lastPulledAt)) : new Date(0);
+        switch (entity) {
+            case 'Task':
+                if (type === 'DELETE') {
+                    const deleteResult = await syncDeleteTask(normalizedData.id, userId);
+                    if (!deleteResult.success) throw new ValidationError(deleteResult.error);
+                    result = { id: normalizedData.id };
+                } else {
+                    const pushResult = await syncPushTask(normalizedData, userId, type);
+                    if (!pushResult.success) throw new ValidationError(pushResult.error);
+                    result = pushResult.data;
+                }
+                break;
 
-        const tasks = await db.task.findMany({ where: { userId: safeUserId, lastModifiedAt: { gt: since } } });
-        const events = await db.event.findMany({ where: { userId: safeUserId, lastModifiedAt: { gt: since } } }); // Need to check if Event has lastModifiedAt
-        const grades = await db.grade.findMany({ where: { userId: safeUserId, lastModifiedAt: { gt: since } } });
-        const courses = await db.course.findMany({ where: { userId: safeUserId, updatedAt: { gt: since } } }); // Course uses updatedAt
+            case 'Event':
+                result = await EventSyncService.push(normalizedData, userId, type);
+                break;
 
-        // Log history
+            case 'Grade':
+                result = await GradeSyncService.push(normalizedData, userId, type);
+                break;
+
+            case 'Work':
+                result = await WorkSyncService.push(normalizedData, userId, type);
+                break;
+
+            case 'Course':
+                result = await CourseSyncService.push(normalizedData, userId, type);
+                break;
+
+            default:
+                throw new ValidationError(`Entite non supportee: ${entity}`);
+        }
+    } catch (error: any) {
+        if (isPrismaDataError(error)) {
+            throw new ValidationError(error.message || 'Donnees de synchronisation invalides');
+        }
+        throw error;
+    }
+
+    res.status(200).json({
+        success: true,
+        data: {
+            id: result?.id || normalizedData.id,
+            syncedAt: new Date(),
+            entity: result
+        }
+    });
+});
+
+/**
+ * Handle PULL synchronization from client
+ */
+export const handleSyncPull = catchAsync(async (req: Request, res: Response) => {
+    const userId = (req as any).user?.userId;
+    if (!userId) throw new UnauthorizedError();
+    if (!isValidUuid(userId)) throw new UnauthorizedError('Token utilisateur invalide');
+
+    const candidateDate = req.query.lastPulledAt ? new Date(String(req.query.lastPulledAt)) : new Date(0);
+    const lastPulledAt = Number.isNaN(candidateDate.getTime()) ? new Date(0) : candidateDate;
+    const deviceId = (req.query.deviceId as string) || 'unknown';
+
+    const safePull = async <T>(label: string, fn: () => Promise<T[]>): Promise<T[]> => {
+        try {
+            return await fn();
+        } catch (error) {
+            logger.error({ msg: `sync pull failed for ${label}`, error, userId });
+            return [];
+        }
+    };
+
+    const [tasks, events, grades, works, courses] = await Promise.all([
+        safePull('tasks', () => syncPullTasks(userId, lastPulledAt)),
+        safePull('events', () => EventSyncService.pull(userId, lastPulledAt)),
+        safePull('grades', () => GradeSyncService.pull(userId, lastPulledAt)),
+        safePull('works', () => WorkSyncService.pull(userId, lastPulledAt)),
+        safePull('courses', () => CourseSyncService.pull(userId, lastPulledAt))
+    ]);
+
+    const formattedTasks = tasks.map(ensureTaskCompatibility);
+
+    try {
         await db.syncHistory.create({
             data: {
-                userId: safeUserId,
-                deviceId: (req.query.deviceId as string) || 'unknown',
+                userId,
+                deviceId,
                 syncType: 'PULL',
                 status: 'COMPLETED',
-                itemsPulled: tasks.length + events.length + grades.length + courses.length
+                itemsPulled: formattedTasks.length + events.length + grades.length + works.length + courses.length
             }
         });
+    } catch (error) {
+        logger.warn({ msg: 'syncHistory PULL skipped', error });
+    }
 
-        res.json({
+    res.status(200).json({
+        success: true,
+        data: {
             changes: {
-                tasks,
+                tasks: formattedTasks,
                 events,
                 grades,
+                works,
                 courses
             },
             timestamp: new Date()
-        });
-    } catch (error: any) {
-        res.status(500).json({ success: false, error: error.message });
-    }
-};
+        }
+    });
+});
