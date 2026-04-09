@@ -25,13 +25,13 @@ const logger_1 = require("./utils/logger");
 const app = (0, express_1.default)();
 app.use((0, pino_http_1.pinoHttp)({ logger: logger_1.logger }));
 const allowedOrigins = (process.env.CORS_ORIGINS ||
-    "http://localhost:5173,http://localhost:3000,https://rehnqfuoyxmbzrxoxroc.supabase.co")
+    "http://localhost:5173,localhost:4173,http://localhost:3000,localhost:3000,https://rehnqfuoyxmbzrxoxroc.supabase.co,https://study-flow-ebon.vercel.app/")
     .split(",")
     .map((origin) => origin.trim())
     .filter(Boolean);
 exports.globalLimiter = (0, express_rate_limit_1.default)({
     windowMs: 15 * 60 * 1000,
-    max: 100,
+    max: 5000,
     standardHeaders: true,
     legacyHeaders: false,
     skip: (req) => req.method === "OPTIONS",

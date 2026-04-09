@@ -23,7 +23,7 @@ app.use(pinoHttp({ logger }));
 
 const allowedOrigins = (
   process.env.CORS_ORIGINS ||
-  "http://localhost:5173,http://localhost:3000,https://rehnqfuoyxmbzrxoxroc.supabase.co"
+  "http://localhost:5173,localhost:4173,http://localhost:3000,localhost:3000,https://rehnqfuoyxmbzrxoxroc.supabase.co,https://study-flow-ebon.vercel.app/"
 )
   .split(",")
   .map((origin) => origin.trim())

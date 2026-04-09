@@ -15,7 +15,6 @@ const register = async (req, res) => {
     }
     catch (error) {
         const message = error instanceof Error ? error.message : 'Erreur interne';
-        // CORRECTIF: email déjà pris → 409, pas 500
         if (message.toLowerCase().includes('unique') || message.toLowerCase().includes('already')) {
             return (0, apiResponse_1.sendError)(res, 'Un compte avec cet email existe déjà.', 409, 'EMAIL_TAKEN');
         }
@@ -30,7 +29,6 @@ const login = async (req, res) => {
         (0, apiResponse_1.sendSuccess)(res, { user, tokens });
     }
     catch (error) {
-        // CORRECTIF: toujours 401, jamais 500 — on ne révèle pas la raison exacte
         (0, apiResponse_1.sendError)(res, 'Identifiants invalides.', 401, 'INVALID_CREDENTIALS');
     }
 };
